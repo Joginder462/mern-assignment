@@ -1,0 +1,109 @@
+version: '3.8'
+
+services:
+  redis:
+    image: redis:alpine
+    container_name: course-compass-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - course-compass-network
+
+  elasticsearch:
+    image: elasticsearch:8.11.0
+    container_name: course-compass-elasticsearch
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+    ports:
+      - "9200:9200"
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+    networks:
+      - course-compass-network
+
+  auth-ms:
+    build: 
+      context: ./microservices/auth
+      dockerfile: Dockerfile
+    container_name: course-compass-auth
+    ports:
+      - "4000:4000"
+    environment:
+      - NODE_ENV=production
+      - PORT=4000
+      - MONGODB_URI=mongodb://host.docker.internal:27017/auth-service
+      - JWT_SECRET=your-super-secret-jwt-key-change-in-production
+      - JWT_EXPIRY=4h
+      - CORS_ORIGIN=http://localhost:9002
+    networks:
+      - course-compass-network
+    restart: unless-stopped
+
+  ai-ms:
+    build: 
+      context: ./microservices/ai
+      dockerfile: Dockerfile
+    container_name: course-compass-ai
+    ports:
+      - "4001:4001"
+    environment:
+      - NODE_ENV=production
+      - PORT=4001
+      - GEMINI_API_KEY=your-AIzaSyAhUH6YNwLoB13k9bndosrtJuJot4rDAzk
+      - CORS_ORIGIN=http://localhost:9002
+    networks:
+      - course-compass-network
+    restart: unless-stopped
+
+  courses-ms:
+    build: 
+      context: ./microservices/courses
+      dockerfile: Dockerfile
+    container_name: course-compass-courses
+    ports:
+      - "4002:4002"
+    environment:
+      - NODE_ENV=production
+      - PORT=4002
+      - MONGODB_URI=mongodb://host.docker.internal:27017/course-management
+      - ELASTICSEARCH_URL=http://elasticsearch:9200
+      - REDIS_URL=redis://redis:6379
+      - CORS_ORIGIN=http://localhost:9002
+    depends_on:
+      - redis
+      - elasticsearch
+    networks:
+      - course-compass-network
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    container_name: course-compass-frontend
+    ports:
+      - "9002:9002"
+    environment:
+      - NODE_ENV=production
+      - NEXT_PUBLIC_AUTH_API_URL=http://localhost:4000
+      - NEXT_PUBLIC_AI_API_URL=http://localhost:4001
+      - NEXT_PUBLIC_COURSES_API_URL=http://localhost:4002
+    depends_on:
+      - auth-ms
+      - ai-ms
+      - courses-ms
+    networks:
+      - course-compass-network
+    restart: unless-stopped
+
+volumes:
+  redis_data:
+  elasticsearch_data:
+
+networks:
+  course-compass-network:
+    driver: bridge
